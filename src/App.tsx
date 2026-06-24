@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
+/**
+ * Defines the only status values allowed for a client.
+ * This helps prevent typos and keeps the CRM data consistent.
+ */
 type ClientStatus = "Prospect" | "Active" | "Follow Up" | "Closed";
 
+/**
+ * Defines the structure of a client record.
+ * This should match the data coming from the Express backend.
+ */
 type Client = {
   id: number;
   name: string;
@@ -13,45 +21,10 @@ type Client = {
   notes: string;
 };
 
-const starterClients: Client[] = [
-  {
-    id: 1,
-    name: "Sarah Johnson",
-    business: "Johnson Beauty Studio",
-    email: "sarah@beautystudio.com",
-    phone: "515-555-0142",
-    status: "Active",
-    notes: "Interested in website redesign and AI appointment automation.",
-  },
-  {
-    id: 2,
-    name: "Marcus Lee",
-    business: "Lee Home Services",
-    email: "marcus@leehomeservices.com",
-    phone: "612-555-0198",
-    status: "Prospect",
-    notes: "Needs CRM setup and follow-up automation for leads.",
-  },
-  {
-    id: 3,
-    name: "Amanda Wilson",
-    business: "Wilson Co. Designs",
-    email: "amanda@wilsondesigns.com",
-    phone: "704-555-0173",
-    status: "Follow Up",
-    notes: "Follow up about branding package and website project.",
-  },
-  {
-    id: 4,
-    name: "David Thompson",
-    business: "Thompson Real Estate",
-    email: "david@thompsonre.com",
-    phone: "320-555-0184",
-    status: "Active",
-    notes: "Monthly retainer for marketing and lead generation.",
-  },
-];
-
+/**
+ * Converts a full name into initials.
+ * Example: "Maurica Bellaphant" becomes "MB".
+ */
 function getInitials(name: string) {
   return name
     .split(" ")
@@ -61,13 +34,19 @@ function getInitials(name: string) {
 }
 
 function App() {
-  const [clients, setClients] = useState<Client[]>(() => {
-    const saved = localStorage.getItem("clientCrmClients");
-    return saved ? JSON.parse(saved) : starterClients;
-  });
+  /**
+   * Stores the client list returned from the backend API.
+   */
+  const [clients, setClients] = useState<Client[]>([]);
 
+  /**
+   * Stores the search text entered by the user.
+   */
   const [search, setSearch] = useState("");
 
+  /**
+   * Stores form data for creating a new client.
+   */
   const [form, setForm] = useState({
     name: "",
     business: "",
@@ -77,16 +56,45 @@ function App() {
     notes: "",
   });
 
-  useEffect(() => {
-    localStorage.setItem("clientCrmClients", JSON.stringify(clients));
-  }, [clients]);
+  /**
+   * Tracks which client is currently being edited.
+   * null means no client is being edited.
+   */
+  const [editingId, setEditingId] = useState<number | null>(null);
 
+  /**
+   * Stores form data while editing an existing client.
+   */
+  const [editForm, setEditForm] = useState({
+    business: "",
+    email: "",
+    phone: "",
+    notes: "",
+  });
+
+  /**
+   * Loads client data from the Express backend when the app first opens.
+   */
+  useEffect(() => {
+    fetch("http://localhost:5000/api/clients")
+      .then((response) => response.json())
+      .then((data) => setClients(data))
+      .catch((error) => console.error("Failed to load clients:", error));
+  }, []);
+
+  /**
+   * Filters clients based on the search input.
+   */
   const filteredClients = clients.filter((client) =>
     `${client.name} ${client.business} ${client.email} ${client.status}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
 
+  /**
+   * Calculates dashboard statistics.
+   * useMemo prevents recalculating unless the clients array changes.
+   */
   const stats = useMemo(() => {
     return {
       total: clients.length,
@@ -98,7 +106,10 @@ function App() {
     };
   }, [clients]);
 
-  function handleSubmit(e: React.FormEvent) {
+  /**
+   * Creates a new client by sending form data to the backend API.
+   */
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
     if (!form.name || !form.business || !form.email) {
@@ -106,10 +117,15 @@ function App() {
       return;
     }
 
-    const newClient: Client = {
-      id: Date.now(),
-      ...form,
-    };
+    const response = await fetch("http://localhost:5000/api/clients", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(form),
+    });
+
+    const newClient = await response.json();
 
     setClients([newClient, ...clients]);
 
@@ -121,6 +137,71 @@ function App() {
       status: "Prospect",
       notes: "",
     });
+  }
+
+  /**
+   * Deletes a client from the backend and removes it from the UI.
+   */
+  async function deleteClient(id: number) {
+    await fetch(`http://localhost:5000/api/clients/${id}`, {
+      method: "DELETE",
+    });
+
+    setClients(clients.filter((client) => client.id !== id));
+  }
+
+  /**
+   * Updates only the client's status.
+   */
+  async function updateClientStatus(id: number, status: ClientStatus) {
+    const response = await fetch(`http://localhost:5000/api/clients/${id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status }),
+    });
+
+    const updatedClient = await response.json();
+
+    setClients(
+      clients.map((client) => (client.id === id ? updatedClient : client))
+    );
+  }
+
+  /**
+   * Opens edit mode and fills the edit form with the selected client's data.
+   */
+  function startEditing(client: Client) {
+    setEditingId(client.id);
+
+    setEditForm({
+      business: client.business,
+      email: client.email,
+      phone: client.phone,
+      notes: client.notes,
+    });
+  }
+
+  /**
+   * Saves edited client details to the backend.
+   */
+  async function saveClientEdits(id: number) {
+    const response = await fetch(`http://localhost:5000/api/clients/${id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(editForm),
+    });
+
+    const updatedClient = await response.json();
+
+    setClients(
+      clients.map((client) => (client.id === id ? updatedClient : client))
+    );
+
+    setEditingId(null);
   }
 
   return (
@@ -295,33 +376,107 @@ function App() {
 
                   <div className="client-info">
                     <h3>{client.name}</h3>
-                    <strong>{client.business}</strong>
 
-                    <div className="client-meta">
-                      <span>✉ {client.email}</span>
-                      <span>📞 {client.phone || "Not provided"}</span>
-                    </div>
+                    {editingId === client.id ? (
+                      <div className="edit-fields">
+                        <input
+                          value={editForm.business}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              business: e.target.value,
+                            })
+                          }
+                          placeholder="Business"
+                        />
 
-                    <p>▣ {client.notes}</p>
+                        <input
+                          value={editForm.email}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              email: e.target.value,
+                            })
+                          }
+                          placeholder="Email"
+                        />
+
+                        <input
+                          value={editForm.phone}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              phone: e.target.value,
+                            })
+                          }
+                          placeholder="Phone"
+                        />
+
+                        <textarea
+                          value={editForm.notes}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              notes: e.target.value,
+                            })
+                          }
+                          placeholder="Notes"
+                        />
+
+                        <div className="edit-actions">
+                          <button onClick={() => saveClientEdits(client.id)}>
+                            Save
+                          </button>
+
+                          <button onClick={() => setEditingId(null)}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <strong>{client.business}</strong>
+
+                        <div className="client-meta">
+                          <span>✉ {client.email}</span>
+                          <span>📞 {client.phone || "Not provided"}</span>
+                        </div>
+
+                        <p>▣ {client.notes}</p>
+
+                        <button
+                          className="edit-btn"
+                          onClick={() => startEditing(client)}
+                        >
+                          Edit Client
+                        </button>
+                      </>
+                    )}
                   </div>
 
-                  <span
+                  <select
                     className={`status ${client.status
                       .replace(" ", "-")
                       .toLowerCase()}`}
-                  >
-                    {client.status}
-                  </span>
-
-                  <button
-                    className="dots"
-                    onClick={() =>
-                      setClients(
-                        clients.filter((saved) => saved.id !== client.id)
+                    value={client.status}
+                    onChange={(e) =>
+                      updateClientStatus(
+                        client.id,
+                        e.target.value as ClientStatus
                       )
                     }
                   >
-                    ⋯
+                    <option>Prospect</option>
+                    <option>Active</option>
+                    <option>Follow Up</option>
+                    <option>Closed</option>
+                  </select>
+
+                  <button
+                    className="dots"
+                    onClick={() => deleteClient(client.id)}
+                  >
+                    ×
                   </button>
                 </article>
               ))}
